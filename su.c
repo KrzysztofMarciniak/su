@@ -66,7 +66,7 @@ static void switch_user(struct passwd *user, char **program, char change_environ
     setenv("SHELL", shell, 1);
     setenv("USER", user->pw_name, 1);
     setenv("LOGNAME", user->pw_name, 1);
-    setenv("PATH", user->pw_uid ? USER_PATH : ROOT_PATH, 1);
+    setenv("PATH", USER_PATH, 1);
 
     if (!program) {
         execl(shell, shell, (char*)NULL);
