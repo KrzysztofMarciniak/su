@@ -1,9 +1,9 @@
-CFLAGS = -Wall -Wpedantic -Wextra -Wl,-z,now
+CFLAGS = -Wall -Wpedantic -Wextra -Wl,-z,now -Wno-unused-result
 CFLAGS_RELEASE = ${CFLAGS} -O2 -D_FORTIFY_SOURCE=2
 CFLAGS_DEBUG = ${CFLAGS} -O0 -g -fsanitize=undefined
 CFLAGS_STATIC = ${CFLAGS_RELEASE} -static-pie
 LIBS = -lcrypt
-CC = gcc
+CC ?= gcc
 PREFIX ?= /usr/local
 
 all: su.c su.h
