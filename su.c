@@ -1,93 +1,80 @@
 #include "su.h"
 
-static void switch_user(struct passwd *user, char **program, char change_enviroment)
+static void write_error(const char *msg)
 {
-    if (setgid(user->pw_gid) < 0){
-        fprintf(stderr, "Could not setgid.\n");
-        exit(EXIT_FAILURE);
-    }
-    if (setuid(user->pw_uid) < 0){
-        fprintf(stderr, "Could not setuid.\n");
-        exit(EXIT_FAILURE);
-    }
-    char const *term = getenv("TERM");
-    if (term) {
-        setenv("TERM", term, (int)change_enviroment);
-    }
-    setenv("HOME", user->pw_dir, (int)change_enviroment);
-    setenv("SHELL", user->pw_shell, (int)change_enviroment);
-    setenv("USER", user->pw_name, (int)change_enviroment);
-    setenv("LOGNAME", user->pw_name, (int)change_enviroment);
-    setenv("PATH", (user->pw_uid ? USER_PATH : ROOT_PATH), (int)change_enviroment);
-
-    if (!program) {
-        if (!user->pw_shell){
-            execl(SHELL, SHELL, (char*)NULL);
-            exit(EXIT_SUCCESS);
-        }
-        execl(user->pw_shell, user->pw_shell, (char*)NULL);
-        exit(EXIT_SUCCESS);
-    }
-    if (execvp(*program, program) == -1) {
-        fprintf(stderr, "%s: command not found\n", *program);
-        exit(EXIT_FAILURE);
-    }
-    exit(EXIT_SUCCESS);
+    write(STDERR_FILENO, msg, strlen(msg));
 }
 
-static void* erase_from_memory(void *s, size_t n)
+static void switch_user(struct passwd *user, char **program, char change_environment)
+{
+    if (setgid(user->pw_gid) < 0 || setuid(user->pw_uid) < 0) {
+        write_error("setgid/setuid failed\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    char const *term = getenv("TERM");
+    if (term) setenv("TERM", term, change_environment);
+    
+    setenv("HOME", user->pw_dir, change_environment);
+    setenv("SHELL", user->pw_shell, change_environment);
+    setenv("USER", user->pw_name, change_environment);
+    setenv("LOGNAME", user->pw_name, change_environment);
+    setenv("PATH", user->pw_uid ? USER_PATH : ROOT_PATH, change_environment);
+
+    if (!program) {
+        execl(user->pw_shell ?: SHELL, user->pw_shell ?: SHELL, (char*)NULL);
+        write_error("execl failed\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    if (execvp(*program, program) == -1) {
+        write(STDERR_FILENO, *program, strlen(*program));
+        write_error(": command not found\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
+static void erase_from_memory(void *s, size_t n)
 {
     volatile unsigned char *p = s;
-    while(n--) {
-        *p++ = 0;
-    }
-    return s;
+    while(n--) *p++ = 0;
 }
 
 static int check_password(struct spwd* shadow)
 {
-    /*check for empty password*/
-    if (!strcmp(shadow->sp_pwdp, "*") || !strcmp(shadow->sp_pwdp, "")) {
-#ifdef EMPTY_PASSWORD
-        return 0;
-#else
+    if (!shadow->sp_pwdp || !*shadow->sp_pwdp || !strcmp(shadow->sp_pwdp, "*")) {
+        write_error("Empty password not allowed\n");
         exit(EXIT_FAILURE);
-#endif
     }
+    
     char pass[PWD_MAX + 1];
-    struct termios term;
-    tcgetattr(1, &term);
-    term.c_lflag &= ~ECHO;
-    tcsetattr(1, 0, &term);
-    term.c_lflag |= ECHO;
-    if (write(1, "Enter the password: ", 20) < 0) {
-        tcsetattr(1, 0, &term);
-    }
-    int n = read(0, pass, PWD_MAX);
+    struct termios old_term, new_term;
+    
+    tcgetattr(STDIN_FILENO, &old_term);
+    new_term = old_term;
+    new_term.c_lflag &= ~ECHO;
+    tcsetattr(STDIN_FILENO, TCSANOW, &new_term);
+    
+    write(STDOUT_FILENO, "Password: ", 10);
+    
+    int n = read(STDIN_FILENO, pass, PWD_MAX);
+    tcsetattr(STDIN_FILENO, TCSANOW, &old_term);
+    
     if (n <= 0) {
-#ifdef HARDENED
         erase_from_memory(pass, sizeof(pass));
-#endif
-        fprintf(stderr, "Error reading password.\n");
-        tcsetattr(1, 0, &term);
+        write_error("read failed\n");
         exit(EXIT_FAILURE);
     }
-    tcsetattr(1, 0, &term);
-    printf("\n");
+    
     pass[n - 1] = '\0';
-
     char *hashed = crypt(pass, shadow->sp_pwdp);
-#ifdef HARDENED
     erase_from_memory(pass, sizeof(pass));
-#endif
-    if (!hashed){
-        fprintf(stderr, "Could not hash password, does your user have a password?.\n");
+    
+    if (!hashed || strcmp(hashed, shadow->sp_pwdp)) {
+        write_error("Authentication failed\n");
         exit(EXIT_FAILURE);
     }
-    if (strcmp(hashed, shadow->sp_pwdp)){
-        fprintf(stderr, "Wrong password.\n");
-        exit(EXIT_FAILURE);
-    }
+    
     return 0;
 }
 
@@ -95,54 +82,46 @@ int main(int argc, char **argv)
 {
     uid_t ruid = getuid();
     struct passwd *user = NULL;
+    char **program = NULL;
+    char change_environment = 1;
+    
     if (argc == 1) {
         user = getpwuid(0);
-    }
-    else {
-#ifdef MINIMAL
-        if (argc > 2) {
-            printf("USAGE: %s [user] [-p -m -c]\n", argv[0]);
-            return 0;
-        }
-        user = getpwnam(argv[1]);
-#else
-        char **ptr = argv;
-        while(*(++ptr)) {
-            if (!command && !strcmp(*ptr, "-c")) {
-                command = ptr + 1;
-            }
-            if (change_enviroment && (!strcmp(*ptr, "-m") || !strcmp(*ptr, "-p"))) {
-                if (command) {
-                    *ptr = NULL;
-                }
-                change_enviroment = 0;
+    } else {
+        char **ptr = argv + 1;
+        while (*ptr) {
+            if (!strcmp(*ptr, "-c") && ptr[1]) {
+                program = ptr + 1;
+                *ptr = NULL;
+                ptr++;
+            } else if (!strcmp(*ptr, "-m") || !strcmp(*ptr, "-p")) {
+                change_environment = 0;
+                ptr++;
+            } else if (!user) {
+                user = getpwnam(*ptr);
+                ptr++;
+            } else {
+                ptr++;
             }
         }
-        user = strstr(FLAGS, argv[1]) ? getpwuid(0) : getpwnam(argv[1]);
-	if (command && *command == NULL) {
-            command = NULL;
-        }
-#endif
+        if (!user) user = getpwuid(0);
     }
-    if (!user){
-        fprintf(stderr, "User does not exist\n");
-        return -1;
+    
+    if (!user) {
+        write_error("User does not exist\n");
+        return EXIT_FAILURE;
     }
-    if (ruid) {
-        if (ruid == user->pw_uid){
-            return 0;
-        }
+    
+    if (ruid && ruid != user->pw_uid) {
         struct spwd* shadow = getspnam(user->pw_name);
-        if (!shadow || !shadow->sp_pwdp){
-            fprintf(stderr, "Could not get shadow entry.\n");
-            return 1;
+        if (!shadow) {
+            write_error("Cannot access shadow entry\n");
+            return EXIT_FAILURE;
         }
-#ifdef REQUIRE_PASSWORD
-        if (check_password(shadow)) {
-            return 1;
-        }
-#endif
+        check_password(shadow);
     }
-    switch_user(user, command, change_enviroment);
-    return 0;
+    
+    switch_user(user, program, change_environment);
+    return EXIT_FAILURE;
 }
+

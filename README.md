@@ -1,4 +1,20 @@
 # su
+
+original size:
+```sh
+$ size su
+   text    data     bss     dec     hex filename
+   5345     785      24    6154    180a su
+```
+improved size:
+```sh
+$ size ./su
+   text    data     bss     dec     hex filename
+   4818     760       8    5586    15d2 ./su
+
+```
+
+
 Minimal su without pam dependency
 
 This app is called su to make is easier to replace GNU/su.
