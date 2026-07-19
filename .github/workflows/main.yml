@@ -31,7 +31,13 @@ jobs:
         run: |
           file su
           size su
-          ldd su && exit 1 || echo "Confirmed static binary"
+          if ldd su 2>&1 | grep -q "not a dynamic executable\|statically linked"; then
+            echo "Confirmed static binary"
+          else
+            echo "Binary is dynamically linked"
+            exit 1
+          fi
+
 
       - name: Rename binary
         run: cp su su-static-linux-x86_64
