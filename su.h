@@ -1,3 +1,6 @@
+#ifndef SU_H
+#define SU_H
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <pwd.h>
@@ -6,17 +9,12 @@
 #include <shadow.h>
 #include <termios.h>
 #include <unistd.h>
+#include <crypt.h>
 
 #define PWD_MAX 200
+#define SHELL "/bin/bash"
 #define USER_PATH "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin:/usr/lib/llvm/16/bin:/usr/lib/llvm/15/bin"
 #define ROOT_PATH "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin:/usr/lib/llvm/16/bin:/usr/lib/llvm/15/bin"
-#define FLAGS "-c-m-p"
 
-#define SHELL "/bin/bash"		/* chose what shell to spawn if user han no shell */
-/*#define MINIMAL*/			/* uncomment to build without support for flags*/
-#define HARDENED			/* clear the password in memory, with a performance hit*/
-#define REQUIRE_PASSWORD		/* comment to not require a password to become root */
-/*#define EMPTY_PASSWORD*/		/* allow empty passwords */
+#endif
 
-static char change_enviroment = 1;
-static char **command = NULL;

@@ -10,8 +10,7 @@ improved size:
 ```sh
 $ size ./su
    text    data     bss     dec     hex filename
-   4818     760       8    5586    15d2 ./su
-
+   4786     760       8    5554    15b2 ./su
 ```
 
 
