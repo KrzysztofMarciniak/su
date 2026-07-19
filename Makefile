@@ -27,5 +27,8 @@ uninstall:
 	rm ${DESTDIR}${PREFIX}/bin/su
 	rm ${DESTDIR}${PREFIX}/share/man/man1/su.1
 
+.PHONY: all static debug install uninstall clean
+
 clean:
-	rm su
+	rm -f su
+
